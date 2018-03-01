@@ -33,6 +33,7 @@ type FacebookAuthProvider struct {
 	us           UserStorage
 	secure       bool
 	domain       string
+	callbackURL  string
 }
 
 // FacebookProviderConfig configuration structure for FacebookAuthProvider
@@ -42,6 +43,7 @@ type FacebookProviderConfig struct {
 	UserStorage   UserStorage
 	SecureCookies bool
 	Domain        string
+	CallbackURL   string
 }
 
 // NewFacebookAuthProvider creates new auth provider using config structure
@@ -53,6 +55,8 @@ func NewFacebookAuthProvider(conf FacebookProviderConfig) *FacebookAuthProvider 
 		gc:           gcache.New(20).LRU().Build(),
 		us:           conf.UserStorage,
 		secure:       conf.SecureCookies,
+		domain:       conf.Domain,
+		callbackURL:  conf.CallbackURL,
 	}
 }
 
@@ -218,9 +222,9 @@ func (fp *FacebookAuthProvider) HandleFacebook(w http.ResponseWriter, r *http.Re
 		Driver("facebook").        // Set provider
 		Scopes([]string{"email"}). // Set optional scope(s)
 		Redirect(                  //
-			fp.clientID,                                    // Client ID
-			fp.clientSecret,                                // Client Secret
-			"http://localhost:3000/auth/facebook/callback", // Redirect URL
+			fp.clientID,     // Client ID
+			fp.clientSecret, // Client Secret
+			fp.callbackURL,  // Redirect URL
 		)
 
 	// Check for errors (usually driver not valid)
