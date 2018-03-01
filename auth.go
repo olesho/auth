@@ -127,7 +127,9 @@ func (fp *FacebookAuthProvider) checkRequest(request *http.Request) *http.Reques
 	token := request.Header.Get("token")
 	if token == "" {
 		tokenCookie, _ := request.Cookie("token")
-		token = tokenCookie.Value
+		if tokenCookie != nil {
+			token = tokenCookie.Value
+		}
 	}
 
 	idString, err := fp.gc.GetIFPresent(token)
