@@ -34,6 +34,7 @@ type FacebookAuthProvider struct {
 	secure       bool
 	domain       string
 	callbackURL  string
+	successURL   string
 }
 
 // FacebookProviderConfig configuration structure for FacebookAuthProvider
@@ -44,6 +45,7 @@ type FacebookProviderConfig struct {
 	SecureCookies bool
 	Domain        string
 	CallbackURL   string
+	SuccessURL    string
 }
 
 // NewFacebookAuthProvider creates new auth provider using config structure
@@ -57,6 +59,7 @@ func NewFacebookAuthProvider(conf FacebookProviderConfig) *FacebookAuthProvider 
 		secure:       conf.SecureCookies,
 		domain:       conf.Domain,
 		callbackURL:  conf.CallbackURL,
+		successURL:   conf.SuccessURL,
 	}
 }
 
@@ -134,6 +137,10 @@ func (fp *FacebookAuthProvider) checkRequest(request *http.Request) *http.Reques
 		if tokenCookie != nil {
 			token = tokenCookie.Value
 		}
+	}
+
+	if token == "" {
+		return nil
 	}
 
 	idString, err := fp.gc.GetIFPresent(token)
@@ -214,10 +221,13 @@ func (fp *FacebookAuthProvider) HandleFacebookCallback(w http.ResponseWriter, r 
 		Domain:   fp.domain,
 		Path:     "/",
 	})
+
+	http.Redirect(w, r, fp.successURL, 301)
 }
 
 // HandleFacebook handles FB authorization
 func (fp *FacebookAuthProvider) HandleFacebook(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Callback %v", fp.callbackURL)
 	authURL, err := fp.gocial.New().
 		Driver("facebook").        // Set provider
 		Scopes([]string{"email"}). // Set optional scope(s)
