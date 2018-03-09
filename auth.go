@@ -31,35 +31,29 @@ type FacebookAuthProvider struct {
 	gocial       *gocialite.Dispatcher
 	gc           gcache.Cache
 	us           UserStorage
-	secure       bool
-	domain       string
-	callbackURL  string
-	successURL   string
+	conf         FacebookProviderConfig
 }
 
 // FacebookProviderConfig configuration structure for FacebookAuthProvider
 type FacebookProviderConfig struct {
 	ClientID      string
 	ClientSecret  string
-	UserStorage   UserStorage
 	SecureCookies bool
 	Domain        string
 	CallbackURL   string
 	SuccessURL    string
+	FailURL       string
 }
 
 // NewFacebookAuthProvider creates new auth provider using config structure
-func NewFacebookAuthProvider(conf FacebookProviderConfig) *FacebookAuthProvider {
+func NewFacebookAuthProvider(conf FacebookProviderConfig, us UserStorage) *FacebookAuthProvider {
 	return &FacebookAuthProvider{
 		clientID:     conf.ClientID,
 		clientSecret: conf.ClientSecret,
 		gocial:       gocialite.NewDispatcher(),
 		gc:           gcache.New(20).LRU().Build(),
-		us:           conf.UserStorage,
-		secure:       conf.SecureCookies,
-		domain:       conf.Domain,
-		callbackURL:  conf.CallbackURL,
-		successURL:   conf.SuccessURL,
+		conf:         conf,
+		us:           us,
 	}
 }
 
@@ -116,10 +110,13 @@ func (fp *FacebookAuthProvider) newMiddlewareHandler(h http.Handler) *middleware
 	}
 }
 func (mh *middlewareHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
-	req = mh.fp.checkRequest(req)
-	if req == nil {
-		res.WriteHeader(401)
-		res.Write([]byte("Request unauthorized"))
+	if !mh.fp.checkRequest(req) {
+		if mh.fp.conf.FailURL == "" {
+			res.WriteHeader(401)
+			res.Write([]byte("Request unauthorized"))
+		} else {
+			http.Redirect(res, req, mh.fp.conf.FailURL, 302)
+		}
 		return
 	}
 	mh.h.ServeHTTP(res, req)
@@ -130,7 +127,7 @@ func (fp *FacebookAuthProvider) MiddlewareHandler(h http.Handler) http.Handler {
 	return fp.newMiddlewareHandler(h)
 }
 
-func (fp *FacebookAuthProvider) checkRequest(request *http.Request) *http.Request {
+func (fp *FacebookAuthProvider) checkRequest(request *http.Request) bool {
 	token := request.Header.Get("token")
 	if token == "" {
 		tokenCookie, _ := request.Cookie("token")
@@ -140,7 +137,7 @@ func (fp *FacebookAuthProvider) checkRequest(request *http.Request) *http.Reques
 	}
 
 	if token == "" {
-		return nil
+		return false
 	}
 
 	idString, err := fp.gc.GetIFPresent(token)
@@ -153,7 +150,7 @@ func (fp *FacebookAuthProvider) checkRequest(request *http.Request) *http.Reques
 	if id, ok := idString.(string); ok {
 		if len(id) > 0 {
 			ctx := context.WithValue(request.Context(), ctxUserID, id)
-			return request.WithContext(ctx)
+			*request = *(request.WithContext(ctx))
 		}
 	}
 
@@ -161,29 +158,33 @@ func (fp *FacebookAuthProvider) checkRequest(request *http.Request) *http.Reques
 	if len(id) > 0 {
 		user, err := fp.us.Find(id)
 		if err != nil {
-			return nil
+			return false
 		}
 
 		if user != nil {
 			err = fp.gc.SetWithExpire(token, id, time.Second*3600)
 			if err != nil {
-				return nil
+				return false
 			}
 
 			ctx := context.WithValue(request.Context(), ctxUserID, id)
-			return request.WithContext(ctx)
+			*request = *(request.WithContext(ctx))
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 // Middleware for protected paths
 func (fp *FacebookAuthProvider) Middleware(f func(res http.ResponseWriter, req *http.Request)) func(http.ResponseWriter, *http.Request) {
 	return func(response http.ResponseWriter, request *http.Request) {
-		request = fp.checkRequest(request)
-		if request == nil {
-			response.WriteHeader(401)
-			response.Write([]byte("Request unauthorized"))
+		if !fp.checkRequest(request) {
+			if fp.conf.FailURL == "" {
+				response.WriteHeader(401)
+				response.Write([]byte("Request unauthorized"))
+			} else {
+				http.Redirect(response, request, fp.conf.FailURL, 302)
+			}
 			return
 		}
 		f(response, request)
@@ -218,23 +219,25 @@ func (fp *FacebookAuthProvider) HandleFacebookCallback(w http.ResponseWriter, r 
 		Value:    token.AccessToken,
 		Secure:   false,
 		HttpOnly: false,
-		Domain:   fp.domain,
+		Domain:   fp.conf.Domain,
 		Path:     "/",
 	})
 
-	http.Redirect(w, r, fp.successURL, 301)
+	http.Redirect(w, r, fp.conf.SuccessURL, 301)
 }
 
 // HandleFacebook handles FB authorization
 func (fp *FacebookAuthProvider) HandleFacebook(w http.ResponseWriter, r *http.Request) {
-	log.Printf("Callback %v", fp.callbackURL)
+	r.Header.Add("Cache-Control", "no-cache, no-store, must-revalidate")
+	r.Header.Add("Expires", "0")
+
 	authURL, err := fp.gocial.New().
 		Driver("facebook").        // Set provider
 		Scopes([]string{"email"}). // Set optional scope(s)
 		Redirect(                  //
-			fp.clientID,     // Client ID
-			fp.clientSecret, // Client Secret
-			fp.callbackURL,  // Redirect URL
+			fp.clientID,         // Client ID
+			fp.clientSecret,     // Client Secret
+			fp.conf.CallbackURL, // Redirect URL
 		)
 
 	// Check for errors (usually driver not valid)
