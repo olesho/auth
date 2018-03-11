@@ -228,8 +228,8 @@ func (fp *FacebookAuthProvider) HandleFacebookCallback(w http.ResponseWriter, r 
 
 // HandleFacebook handles FB authorization
 func (fp *FacebookAuthProvider) HandleFacebook(w http.ResponseWriter, r *http.Request) {
-	r.Header.Add("Cache-Control", "no-cache, no-store, must-revalidate")
-	r.Header.Add("Expires", "0")
+	w.Header().Add("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Add("Expires", "0")
 
 	authURL, err := fp.gocial.New().
 		Driver("facebook").        // Set provider
